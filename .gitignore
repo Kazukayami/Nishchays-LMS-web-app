@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+backend/.env
+backend/data/*.tmp
+backend/data/lms.json
