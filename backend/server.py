@@ -14,6 +14,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional
+from urllib.parse import urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +42,9 @@ load_env(ROOT / ".env")
 
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_COOKIE_SECURE = os.getenv("JWT_COOKIE_SECURE", "false").lower() == "true"
+JWT_COOKIE_SAMESITE = os.getenv("JWT_COOKIE_SAMESITE", "lax").lower()
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 Role = Literal["admin", "instructor", "employee"]
 
 try:
@@ -49,10 +52,32 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     bcrypt_lib = None
 
+try:
+    import psycopg2  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    psycopg2 = None
+
 
 app = FastAPI(title="Employee LMS API")
 api = APIRouter(prefix="/api")
 store_lock = asyncio.Lock()
+
+
+def postgres_url() -> str:
+    if not DATABASE_URL:
+        return ""
+    parsed = urlparse(DATABASE_URL)
+    if parsed.scheme == "postgres":
+        parsed = parsed._replace(scheme="postgresql")
+    return urlunparse(parsed)
+
+
+def get_pg_connection():
+    if not DATABASE_URL:
+        return None
+    if not psycopg2:
+        raise RuntimeError("DATABASE_URL is set but psycopg2 is not installed")
+    return psycopg2.connect(postgres_url(), sslmode=os.getenv("DB_SSLMODE", "require"))
 
 
 def now_iso() -> str:
@@ -78,6 +103,24 @@ def default_store() -> Dict[str, list]:
 
 
 def read_store() -> Dict[str, list]:
+    if DATABASE_URL:
+        with get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS lms_store (
+                        id integer PRIMARY KEY,
+                        data jsonb NOT NULL
+                    )
+                    """
+                )
+                cur.execute("SELECT data FROM lms_store WHERE id = 1")
+                row = cur.fetchone()
+                if not row:
+                    return default_store()
+                base = default_store()
+                base.update(row[0])
+                return base
     if not DATA_FILE.exists():
         return default_store()
     data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
@@ -87,6 +130,26 @@ def read_store() -> Dict[str, list]:
 
 
 def write_store(data: Dict[str, list]) -> None:
+    if DATABASE_URL:
+        with get_pg_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS lms_store (
+                        id integer PRIMARY KEY,
+                        data jsonb NOT NULL
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    INSERT INTO lms_store (id, data)
+                    VALUES (1, %s)
+                    ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data
+                    """,
+                    (json.dumps(data),),
+                )
+        return
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = DATA_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -187,7 +250,7 @@ def set_auth_cookie(response: Response, token: str) -> None:
         token,
         httponly=True,
         secure=JWT_COOKIE_SECURE,
-        samesite="lax",
+        samesite=JWT_COOKIE_SAMESITE,
         max_age=60 * 60 * 12,
         path="/",
     )
@@ -361,7 +424,7 @@ async def login(body: LoginIn, response: Response):
 
 @api.post("/auth/logout")
 async def logout(response: Response):
-    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("access_token", path="/", secure=JWT_COOKIE_SECURE, samesite=JWT_COOKIE_SAMESITE)
     return {"ok": True}
 
 
@@ -663,16 +726,7 @@ async def comments_for_lesson(lesson_id: str):
 
 
 async def ask_claude(system: str, prompt: str) -> Optional[str]:
-    key = os.getenv("EMERGENT_LLM_KEY", "")
-    if not key:
-        return None
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage  # type: ignore
-
-        chat = LlmChat(api_key=key, session_id=f"lms-{new_id()}", system_message=system).with_model("anthropic", CLAUDE_MODEL)
-        return await chat.send_message(UserMessage(text=prompt))
-    except Exception:
-        return None
+    return None
 
 
 def extract_json(raw: Optional[str]) -> Optional[dict]:

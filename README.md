@@ -10,9 +10,8 @@ A complete local Employee Learning Management System with a FastAPI backend and 
 - Course catalog, modules, lessons, video/text lesson player, enrollment, progress tracking, and certificates.
 - Quiz creation, quiz submission, scoring, and employee-safe quiz fetching that hides correct answers.
 - Assignments, submissions, and lesson discussions/comments.
-- Instructor studio for course creation and AI quiz generation.
+- Instructor studio for course creation and deterministic quiz generation.
 - Admin dashboard for stats and user role management.
-- Optional Claude Sonnet integration through `EMERGENT_LLM_KEY` using the `emergentintegrations` package.
 
 ## Demo Credentials
 
@@ -45,8 +44,62 @@ Copy `backend/.env.example` to `backend/.env` for local development.
 JWT_SECRET="change-this-before-production"
 JWT_COOKIE_SECURE=false
 CORS_ORIGINS="http://localhost:8001,http://127.0.0.1:8001"
-EMERGENT_LLM_KEY=""
 CLAUDE_MODEL="claude-sonnet-4-5-20250929"
 ```
 
-When `EMERGENT_LLM_KEY` is empty or `emergentintegrations` is not installed, AI endpoints return deterministic local fallback output so the app remains usable.
+AI endpoints return deterministic local fallback output so the app remains usable without external services.
+
+## Public Deployment
+
+This repo is ready for split hosting:
+
+- Backend API on Render.
+- Static frontend on Vercel.
+- Persistent data in Render PostgreSQL through `DATABASE_URL`.
+
+### 1. Deploy the Backend on Render
+
+Create a new Render Blueprint from this repository. Render will read `render.yaml`, create the Python web service, and create a managed PostgreSQL database.
+
+Set these Render environment variables before the first production deploy:
+
+```env
+ADMIN_PASSWORD="replace-with-a-strong-password"
+INSTRUCTOR_PASSWORD="replace-with-a-strong-password"
+EMPLOYEE_PASSWORD="replace-with-a-strong-password"
+CORS_ORIGINS="https://your-vercel-app.vercel.app"
+```
+
+Render generates `JWT_SECRET` and wires `DATABASE_URL` from the managed database. The backend start command is:
+
+```bash
+uvicorn server:app --host 0.0.0.0 --port $PORT
+```
+
+After deployment, copy the Render service URL, for example:
+
+```text
+https://nishchays-lms-api.onrender.com
+```
+
+### 2. Deploy the Frontend on Vercel
+
+Import this repository in Vercel and use the root project directory.
+
+Set this Vercel environment variable:
+
+```env
+LMS_API_URL="https://your-render-service.onrender.com/api"
+```
+
+Vercel uses `npm run build`, which copies `frontend/` into `dist/` and writes `dist/config.js` with the API URL.
+
+### 3. Final CORS Update
+
+After Vercel gives you the production URL, update Render's `CORS_ORIGINS` value to the exact Vercel origin:
+
+```env
+CORS_ORIGINS="https://your-vercel-app.vercel.app"
+```
+
+Redeploy the Render service after changing CORS.

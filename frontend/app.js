@@ -1,4 +1,4 @@
-const API = "/api";
+const API = (window.LMS_CONFIG && window.LMS_CONFIG.apiBaseUrl) || "/api";
 const app = document.getElementById("app");
 
 const state = {
