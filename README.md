@@ -51,15 +51,25 @@ AI endpoints return deterministic local fallback output so the app remains usabl
 
 ## Public Deployment
 
-This repo is ready for split hosting:
+This repo is ready for split hosting without paid infrastructure:
 
-- Backend API on Render.
+- Backend API on Render's free web service plan.
 - Static frontend on Vercel.
-- Persistent data in Render PostgreSQL through `DATABASE_URL`.
+- Persistent data in a free external Postgres database through `DATABASE_URL` such as Neon or Supabase.
 
-### 1. Deploy the Backend on Render
+### 1. Create a Free Postgres Database
 
-Create a new Render Blueprint from this repository. Render will read `render.yaml`, create the Python web service, and create a managed PostgreSQL database.
+Create a free Postgres project in Neon or Supabase and copy its pooled connection string. Neon connection strings look like:
+
+```text
+postgresql://user:password@host/dbname?sslmode=require
+```
+
+Use the pooled connection string when available.
+
+### 2. Deploy the Backend on Render
+
+Create a new Render Blueprint from this repository. Render will read `render.yaml` and create the Python web service on the free plan.
 
 Set these Render environment variables before the first production deploy:
 
@@ -68,9 +78,10 @@ ADMIN_PASSWORD="replace-with-a-strong-password"
 INSTRUCTOR_PASSWORD="replace-with-a-strong-password"
 EMPLOYEE_PASSWORD="replace-with-a-strong-password"
 CORS_ORIGINS="https://your-vercel-app.vercel.app"
+DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require"
 ```
 
-Render generates `JWT_SECRET` and wires `DATABASE_URL` from the managed database. The backend start command is:
+Render generates `JWT_SECRET`. The backend start command is:
 
 ```bash
 uvicorn server:app --host 0.0.0.0 --port $PORT
@@ -82,7 +93,7 @@ After deployment, copy the Render service URL, for example:
 https://nishchays-lms-api.onrender.com
 ```
 
-### 2. Deploy the Frontend on Vercel
+### 3. Deploy the Frontend on Vercel
 
 Import this repository in Vercel and use the root project directory.
 
@@ -94,7 +105,7 @@ LMS_API_URL="https://your-render-service.onrender.com/api"
 
 Vercel uses `npm run build`, which copies `frontend/` into `dist/` and writes `dist/config.js` with the API URL.
 
-### 3. Final CORS Update
+### 4. Final CORS Update
 
 After Vercel gives you the production URL, update Render's `CORS_ORIGINS` value to the exact Vercel origin:
 
